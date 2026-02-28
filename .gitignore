@@ -1,0 +1,44 @@
+# Logs
+*.log
+rename-log_*.csv
+
+# Config overrides
+config.local.json
+
+# ExifTool binary (user downloads separately)
+exiftool.exe
+exiftool(-k).exe
+
+# Photos/videos (never commit media)
+photos/
+input/
+output/
+*.jpg
+*.jpeg
+*.png
+*.heic
+*.heif
+*.mov
+*.mp4
+*.m4v
+*.avi
+*.CR2
+*.CR3
+*.ARW
+*.DNG
+*.RAF
+*.NEF
+*.ORF
+*.RW2
+*.tiff
+*.tif
+*.gif
+*.bmp
+*.webp
+*.3gp
+*.mts
+*.aae
+
+# Thumbnail caches
+Thumbs.db
+.DS_Store

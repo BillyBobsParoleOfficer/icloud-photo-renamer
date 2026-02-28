@@ -1,0 +1,38 @@
+{
+  "// INSTRUCTIONS": "Copy this file to config.local.json and edit your settings there. config.local.json is git-ignored.",
+  
+  "inputFolder": "C:\\Users\\YOU\\Pictures\\iCloud Photos",
+  "dryRun": true,
+  "logFile": "rename-log_{timestamp}.csv",
+
+  "// FILE EXTENSIONS to process (case-insensitive)": "",
+  "imageExtensions": [".jpg", ".jpeg", ".png", ".heic", ".heif", ".tiff", ".tif", ".gif", ".bmp", ".webp", ".cr2", ".cr3", ".arw", ".dng", ".raf", ".nef", ".orf", ".rw2"],
+  "videoExtensions": [".mov", ".mp4", ".m4v", ".avi", ".3gp", ".mts"],
+
+  "// EXIFTOOL": "Download from https://exiftool.org — place exiftool.exe next to the script or on PATH",
+  "exiftoolPath": "exiftool",
+
+  "// REVERSE GEOCODING": "",
+  "geocodeProvider": "nominatim",
+  "nominatimEmail": "your-email@example.com",
+  "nominatimDelaySec": 1.1,
+  "geocodeCache": true,
+
+  "// NAMING PATTERN": "Tokens: {country}, {state}, {city}, {suburb}, {road}, {date}, {time}, {ext}",
+  "nameTemplate": "{country}_{city}_{date}_{time}",
+  "dateFormat": "yyyy-MM-dd",
+  "timeFormat": "HH-mm-ss-fff",
+  "duplicateSuffix": "_##",
+  "unknownLocation": "Unknown",
+  "sanitizeChars": true,
+
+  "// GAP-FILL": "Max minutes to look either side when a file has no GPS",
+  "gapFillMaxMinutes": 60,
+
+  "// TIMESTAMP FIX": "Set file Created & Modified to DateTimeOriginal",
+  "fixTimestamps": true,
+
+  "// SUBFOLDER ORGANISATION (optional)": "",
+  "organizeIntoSubfolders": false,
+  "subfolderTemplate": "{country}\\{city}"
+}
