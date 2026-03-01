@@ -1,6 +1,6 @@
 {
   "// INSTRUCTIONS": "Copy this file to config.local.json and edit your settings there. config.local.json is git-ignored.",
-  
+
   "inputFolder": "C:\\Users\\YOU\\Pictures\\iCloud Photos",
   "dryRun": true,
   "logFile": "rename-log_{timestamp}.csv",
@@ -9,8 +9,16 @@
   "imageExtensions": [".jpg", ".jpeg", ".png", ".heic", ".heif", ".tiff", ".tif", ".gif", ".bmp", ".webp", ".cr2", ".cr3", ".arw", ".dng", ".raf", ".nef", ".orf", ".rw2"],
   "videoExtensions": [".mov", ".mp4", ".m4v", ".avi", ".3gp", ".mts"],
 
-  "// EXIFTOOL": "Download from https://exiftool.org — place exiftool.exe next to the script or on PATH",
+  "// EXIFTOOL": "Download from https://exiftool.org - place exiftool.exe next to the script or on PATH",
   "exiftoolPath": "exiftool",
+
+  "// IMAGEMAGICK": "Required for HEIC to JPG conversion. Install: choco install imagemagick",
+  "imageMagickPath": "magick",
+
+  "// HEIC CONVERSION": "Convert HEIC/HEIF to JPG after renaming, move originals to backup folder",
+  "convertHeicToJpg": true,
+  "heicBackupFolder": "heic",
+  "jpgQuality": 95,
 
   "// REVERSE GEOCODING": "",
   "geocodeProvider": "nominatim",
