@@ -1,6 +1,10 @@
 # Logs
 *.log
 rename-log_*.csv
+dryrun-output*.txt
+
+# Geocode cache (regenerated at runtime)
+geocode-cache.json
 
 # Config overrides
 config.local.json

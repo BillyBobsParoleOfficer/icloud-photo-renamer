@@ -98,7 +98,7 @@ if (-not $cfg.ContainsKey('nameTemplate'))           { $cfg['nameTemplate'] = '{
 if (-not $cfg.ContainsKey('dateFormat'))             { $cfg['dateFormat'] = 'yyyy-MM-dd' }
 if (-not $cfg.ContainsKey('timeFormat'))             { $cfg['timeFormat'] = 'HH-mm-ss-fff' }
 if (-not $cfg.ContainsKey('unknownLocation'))        { $cfg['unknownLocation'] = 'Unknown' }
-if (-not $cfg.ContainsKey('gapFillMaxMinutes'))      { $cfg['gapFillMaxMinutes'] = 60 }
+if (-not $cfg.ContainsKey('gapFillMaxMinutes'))      { $cfg['gapFillMaxMinutes'] = 120 }
 if (-not $cfg.ContainsKey('fixTimestamps'))          { $cfg['fixTimestamps'] = $true }
 if (-not $cfg.ContainsKey('organizeIntoSubfolders')) { $cfg['organizeIntoSubfolders'] = $false }
 if (-not $cfg.ContainsKey('subfolderTemplate'))      { $cfg['subfolderTemplate'] = '{country}\{city}' }
@@ -342,12 +342,35 @@ function Invoke-ReverseGeocode {
         Start-Sleep -Seconds $cfg['nominatimDelaySec']   # respect Nominatim rate-limit
 
         $addr = $resp.address
+
+        # Safe property access — Nominatim doesn't always return every field
+        $safeGet = { param($obj, [string]$prop)
+            $p = $obj.PSObject.Properties[$prop]
+            if ($p) { $p.Value } else { $null }
+        }
+
+        $country = & $safeGet $addr 'country'
+        $state   = & $safeGet $addr 'state'
+        $cityVal = @(
+            (& $safeGet $addr 'city'),
+            (& $safeGet $addr 'town'),
+            (& $safeGet $addr 'village'),
+            (& $safeGet $addr 'municipality'),
+            (& $safeGet $addr 'county')
+        ) | Where-Object { $_ } | Select-Object -First 1
+        $suburb  = @(
+            (& $safeGet $addr 'suburb'),
+            (& $safeGet $addr 'neighbourhood'),
+            (& $safeGet $addr 'quarter')
+        ) | Where-Object { $_ } | Select-Object -First 1
+        $road    = & $safeGet $addr 'road'
+
         $result = @{
-            Country = ($addr.country)      -replace '\s+', ' '
-            State   = ($addr.state)        -replace '\s+', ' '
-            City    = (($addr.city, $addr.town, $addr.village, $addr.municipality, $addr.county | Where-Object { $_ }) | Select-Object -First 1) -replace '\s+', ' '
-            Suburb  = (($addr.suburb, $addr.neighbourhood, $addr.quarter | Where-Object { $_ }) | Select-Object -First 1) -replace '\s+', ' '
-            Road    = ($addr.road)         -replace '\s+', ' '
+            Country = if ($country) { $country -replace '\s+', ' ' } else { $null }
+            State   = if ($state)   { $state   -replace '\s+', ' ' } else { $null }
+            City    = if ($cityVal) { $cityVal  -replace '\s+', ' ' } else { $null }
+            Suburb  = if ($suburb)  { $suburb   -replace '\s+', ' ' } else { $null }
+            Road    = if ($road)    { $road     -replace '\s+', ' ' } else { $null }
         }
         $geocodeCache[$key] = $result
         return $result
@@ -404,18 +427,40 @@ Write-Step 'Gap-filling locations for files without GPS...'
 
 $maxGap = [TimeSpan]::FromMinutes($cfg['gapFillMaxMinutes'])
 
+# Build a sorted array of ONLY GPS-tagged files with valid dates for binary search
+$gpsSorted = @($fileInfos | Where-Object { $_.HasGps -and $null -ne $_.DateTaken } | Sort-Object { $_.DateTaken })
+$gpsDates  = @($gpsSorted | ForEach-Object { $_.DateTaken.Ticks })
+
+$gapFillTotal = @($fileInfos | Where-Object { -not $_.HasGps -and $null -ne $_.DateTaken }).Count
+$gapFillIdx = 0
+
 foreach ($fi in $fileInfos) {
     if ($fi.HasGps -or $null -eq $fi.DateTaken) { continue }
 
+    $gapFillIdx++
+    if ($gapFillIdx % 500 -eq 0) {
+        Write-Progress -Activity "Gap-filling" -Status "$gapFillIdx / $gapFillTotal" -PercentComplete (($gapFillIdx / [Math]::Max($gapFillTotal,1)) * 100)
+    }
+
+    # Binary search for the closest GPS-tagged file by date
+    $targetTicks = $fi.DateTaken.Ticks
+    $lo = 0; $hi = $gpsDates.Count - 1
+    if ($hi -lt 0) { continue }
+
+    while ($lo -lt $hi) {
+        $mid = [Math]::Floor(($lo + $hi) / 2)
+        if ($gpsDates[$mid] -lt $targetTicks) { $lo = $mid + 1 } else { $hi = $mid }
+    }
+
+    # Check the nearest 1-2 candidates (the one at $lo and the one before it)
     $bestDelta = [TimeSpan]::MaxValue
     $bestMatch = $null
-
-    foreach ($other in $fileInfos) {
-        if (-not $other.HasGps -or $null -eq $other.DateTaken) { continue }
-        $delta = ($fi.DateTaken - $other.DateTaken).Duration()
+    foreach ($idx in @($lo, ($lo - 1))) {
+        if ($idx -lt 0 -or $idx -ge $gpsSorted.Count) { continue }
+        $delta = ($fi.DateTaken - $gpsSorted[$idx].DateTaken).Duration()
         if ($delta -lt $bestDelta -and $delta -le $maxGap) {
             $bestDelta = $delta
-            $bestMatch = $other
+            $bestMatch = $gpsSorted[$idx]
         }
     }
 
@@ -430,6 +475,7 @@ foreach ($fi in $fileInfos) {
         $fi.GapFilled = $true
     }
 }
+Write-Progress -Activity "Gap-filling" -Completed
 
 $gapFilledCount = @($fileInfos | Where-Object { $_.GapFilled }).Count
 Write-Host "  Gap-filled: $gapFilledCount file(s)`n"
@@ -697,15 +743,104 @@ if (-not $cfg['dryRun']) {
 
 } else {
     # ── DRY-RUN summary ──
-    $heicPreview = @($fileInfos | Where-Object { $_.IsHeic -and $_.FullPath -ne $_.NewPath }).Count
     Write-Host ""
-    Write-Host "  ======================================================" -ForegroundColor Yellow
-    Write-Host "   DRY-RUN complete - no files were changed.             " -ForegroundColor Yellow
-    Write-Host "   Review the plan above, then re-run with  -Apply       " -ForegroundColor Yellow
-    Write-Host "  ======================================================" -ForegroundColor Yellow
-    if ($heicPreview -gt 0 -and $canConvertHeic) {
-        Write-Host "  $heicPreview HEIC file(s) will be converted to JPG and originals moved to '$($cfg['heicBackupFolder'])/' folder." -ForegroundColor Magenta
+    Write-Host "  ==========================================================" -ForegroundColor Yellow
+    Write-Host "   DRY-RUN STATISTICS                                        " -ForegroundColor Yellow
+    Write-Host "  ==========================================================" -ForegroundColor Yellow
+    Write-Host ""
+
+    # --- File type breakdown ---
+    $imageFiles = @($fileInfos | Where-Object { $cfg['imageExtensions'] -contains $_.Extension })
+    $videoFiles = @($fileInfos | Where-Object { $cfg['videoExtensions'] -contains $_.Extension })
+    $heicFiles  = @($fileInfos | Where-Object { $_.IsHeic })
+
+    Write-Host "  FILE TYPES" -ForegroundColor Cyan
+    Write-Host "    Total files        : $($fileInfos.Count)"
+    Write-Host "    Images             : $($imageFiles.Count)"
+    Write-Host "    Videos             : $($videoFiles.Count)"
+    if ($heicFiles.Count -gt 0) {
+        Write-Host "    HEIC/HEIF          : $($heicFiles.Count)  $(if ($canConvertHeic) { '(will convert to JPG)' } else { '(no ImageMagick - skipping conversion)' })" -ForegroundColor Magenta
     }
+
+    # Extension breakdown
+    Write-Host ""
+    Write-Host "    By extension:" -ForegroundColor DarkGray
+    $fileInfos | Group-Object Extension | Sort-Object Count -Descending | ForEach-Object {
+        Write-Host "      $($_.Name.PadRight(8)) : $($_.Count)" -ForegroundColor DarkGray
+    }
+    Write-Host ""
+
+    # --- Date coverage ---
+    $withDate    = @($fileInfos | Where-Object { $null -ne $_.DateTaken })
+    $withoutDate = @($fileInfos | Where-Object { $null -eq $_.DateTaken })
+
+    Write-Host "  DATE COVERAGE" -ForegroundColor Cyan
+    Write-Host "    With date-taken    : $($withDate.Count)"
+    Write-Host "    Without date-taken : $($withoutDate.Count)  (will use file modified date)" -ForegroundColor $(if ($withoutDate.Count -gt 0) { 'Yellow' } else { 'White' })
+
+    if ($withDate.Count -gt 0) {
+        $earliest = ($withDate | Sort-Object { $_.DateTaken } | Select-Object -First 1).DateTaken.ToString('yyyy-MM-dd')
+        $latest   = ($withDate | Sort-Object { $_.DateTaken } | Select-Object -Last 1).DateTaken.ToString('yyyy-MM-dd')
+        Write-Host "    Date range         : $earliest  to  $latest"
+    }
+    Write-Host ""
+
+    # --- GPS & Geocoding ---
+    $withGps       = @($fileInfos | Where-Object { $_.HasGps })
+    $withoutGps    = @($fileInfos | Where-Object { -not $_.HasGps })
+    $gapFilled     = @($fileInfos | Where-Object { $_.GapFilled })
+    $stillNoLoc    = @($fileInfos | Where-Object { -not $_.HasGps -and -not $_.GapFilled })
+
+    Write-Host "  GPS & LOCATION" -ForegroundColor Cyan
+    Write-Host "    With GPS coords    : $($withGps.Count)  ($([Math]::Round(($withGps.Count / [Math]::Max($fileInfos.Count,1)) * 100, 1))%)"
+    Write-Host "    Without GPS        : $($withoutGps.Count)"
+    Write-Host "    Gap-filled         : $($gapFilled.Count)  (inherited location from nearest file in time)" -ForegroundColor $(if ($gapFilled.Count -gt 0) { 'Green' } else { 'White' })
+    Write-Host "    Still no location  : $($stillNoLoc.Count)  (will be named '$($cfg['unknownLocation'])')" -ForegroundColor $(if ($stillNoLoc.Count -gt 0) { 'Yellow' } else { 'White' })
+    Write-Host ""
+
+    # --- Location distribution ---
+    $locatedFiles = @($fileInfos | Where-Object { $_.Country })
+    if ($locatedFiles.Count -gt 0) {
+        Write-Host "  LOCATIONS FOUND" -ForegroundColor Cyan
+
+        # Country breakdown
+        $countries = $locatedFiles | Group-Object { $_.Country } | Sort-Object Count -Descending
+        Write-Host "    Countries:" -ForegroundColor DarkGray
+        foreach ($c in $countries) {
+            $pct = [Math]::Round(($c.Count / $locatedFiles.Count) * 100, 1)
+            Write-Host "      $($c.Name.PadRight(25)) : $("$($c.Count)".PadLeft(6))  ($pct%)" -ForegroundColor DarkGray
+        }
+        Write-Host ""
+
+        # Top cities
+        $cities = $locatedFiles | Group-Object { "$($_.Country) > $($_.City)" } | Sort-Object Count -Descending | Select-Object -First 20
+        Write-Host "    Top cities (up to 20):" -ForegroundColor DarkGray
+        foreach ($c in $cities) {
+            Write-Host "      $($c.Name.PadRight(40)) : $("$($c.Count)".PadLeft(6))" -ForegroundColor DarkGray
+        }
+        Write-Host ""
+    }
+
+    # --- Rename actions ---
+    $willRename = @($fileInfos | Where-Object { $_.FullPath -ne $_.NewPath })
+    $willSkip   = @($fileInfos | Where-Object { $_.FullPath -eq $_.NewPath })
+    $heicPreview = @($fileInfos | Where-Object { $_.IsHeic -and $_.FullPath -ne $_.NewPath })
+
+    Write-Host "  ACTIONS PLANNED" -ForegroundColor Cyan
+    Write-Host "    Will rename        : $($willRename.Count)"
+    Write-Host "    Already correct    : $($willSkip.Count)"
+    if ($heicPreview.Count -gt 0 -and $canConvertHeic) {
+        Write-Host "    HEIC -> JPG        : $($heicPreview.Count)  (originals moved to '$($cfg['heicBackupFolder'])/' folder)" -ForegroundColor Magenta
+    }
+    if ($cfg['fixTimestamps']) {
+        $tsFixable = @($fileInfos | Where-Object { $null -ne $_.DateTaken -and $_.FullPath -ne $_.NewPath }).Count
+        Write-Host "    Timestamps to fix  : $tsFixable"
+    }
+    Write-Host ""
+
+    Write-Host "  ==========================================================" -ForegroundColor Yellow
+    Write-Host "   No files were changed.  Re-run with  -Apply  to execute.  " -ForegroundColor Yellow
+    Write-Host "  ==========================================================" -ForegroundColor Yellow
     Write-Host ""
 }
 
