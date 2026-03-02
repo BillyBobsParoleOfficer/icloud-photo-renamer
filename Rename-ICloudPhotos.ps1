@@ -751,33 +751,43 @@ if (-not $cfg['dryRun']) {
 
     # ── STEP 3: Fix timestamps ──
     if ($cfg['fixTimestamps']) {
-        Write-Step 'Fixing file timestamps...'
-        $fixed = 0
+        Write-Step 'Fixing file timestamps to DateTaken for ALL files...'
+        $fixed = 0; $tsSkipped = 0
         foreach ($fi in $fileInfos) {
-            if ($null -eq $fi.DateTaken) { continue }
+            if ($null -eq $fi.DateTaken) { $tsSkipped++; continue }
 
+            # Build list of every on-disk path that belongs to this file
             $targetPaths = @()
+
             if ($fi.Status -eq 'converted' -and $fi.JpgPath -and (Test-Path $fi.JpgPath)) {
+                # Converted: fix the new JPG
                 $targetPaths += $fi.JpgPath
                 # Also fix the HEIC backup
                 $heicBackupPath = Join-Path (Join-Path $inputDir $cfg['heicBackupFolder']) ([System.IO.Path]::GetFileName($fi.NewPath))
                 if (Test-Path $heicBackupPath) { $targetPaths += $heicBackupPath }
             } elseif ($fi.Status -eq 'renamed' -and (Test-Path $fi.NewPath)) {
+                # Renamed: file is at the new path
                 $targetPaths += $fi.NewPath
+            } elseif (Test-Path $fi.FullPath) {
+                # Skipped (already correct name) or error: file still at original path
+                $targetPaths += $fi.FullPath
             }
 
             foreach ($tp in $targetPaths) {
                 try {
                     $item = Get-Item -LiteralPath $tp
-                    $item.CreationTime   = $fi.DateTaken
-                    $item.LastWriteTime  = $fi.DateTaken
-                    $fixed++
+                    if ($item.CreationTime -ne $fi.DateTaken -or $item.LastWriteTime -ne $fi.DateTaken) {
+                        $item.CreationTime   = $fi.DateTaken
+                        $item.LastWriteTime  = $fi.DateTaken
+                        $fixed++
+                    }
                 } catch {
                     Write-Warning "  FAILED timestamp fix: $tp -> $_"
                 }
             }
         }
         Write-Host "  Timestamps fixed: $fixed file(s)"
+        if ($tsSkipped -gt 0) { Write-Host "  Skipped (no DateTaken): $tsSkipped" }
     } else {
         Write-Step 'Timestamp fix skipped (disabled in config).'
     }
@@ -874,8 +884,8 @@ if (-not $cfg['dryRun']) {
         Write-Host "    HEIC -> JPG        : $($heicPreview.Count)  (originals moved to '$($cfg['heicBackupFolder'])/' folder)" -ForegroundColor Magenta
     }
     if ($cfg['fixTimestamps']) {
-        $tsFixable = @($fileInfos | Where-Object { $null -ne $_.DateTaken -and $_.FullPath -ne $_.NewPath }).Count
-        Write-Host "    Timestamps to fix  : $tsFixable"
+        $tsFixable = @($fileInfos | Where-Object { $null -ne $_.DateTaken }).Count
+        Write-Host "    Timestamps to fix  : $tsFixable  (all files with DateTaken)"
     }
     Write-Host ""
 
