@@ -98,7 +98,7 @@ if (-not $cfg.ContainsKey('nameTemplate'))           { $cfg['nameTemplate'] = '{
 if (-not $cfg.ContainsKey('dateFormat'))             { $cfg['dateFormat'] = 'yyyy-MM-dd' }
 if (-not $cfg.ContainsKey('timeFormat'))             { $cfg['timeFormat'] = 'HH-mm-ss-fff' }
 if (-not $cfg.ContainsKey('unknownLocation'))        { $cfg['unknownLocation'] = 'Unknown' }
-if (-not $cfg.ContainsKey('gapFillMaxMinutes'))      { $cfg['gapFillMaxMinutes'] = 180 }
+if (-not $cfg.ContainsKey('gapFillMaxMinutes'))      { $cfg['gapFillMaxMinutes'] = 720 }
 if (-not $cfg.ContainsKey('fixTimestamps'))          { $cfg['fixTimestamps'] = $true }
 if (-not $cfg.ContainsKey('organizeIntoSubfolders')) { $cfg['organizeIntoSubfolders'] = $false }
 if (-not $cfg.ContainsKey('subfolderTemplate'))      { $cfg['subfolderTemplate'] = '{country}\{city}' }
@@ -107,7 +107,7 @@ if (-not $cfg.ContainsKey('convertHeicToJpg'))       { $cfg['convertHeicToJpg'] 
 if (-not $cfg.ContainsKey('heicBackupFolder'))       { $cfg['heicBackupFolder'] = 'heic' }
 if (-not $cfg.ContainsKey('jpgQuality'))             { $cfg['jpgQuality'] = 95 }
 if (-not $cfg.ContainsKey('imageExtensions'))        {
-    $cfg['imageExtensions'] = @('.jpg','.jpeg','.png','.heic','.heif','.tiff','.tif','.gif','.bmp','.webp','.cr2','.cr3','.arw','.dng','.raf','.nef','.orf','.rw2')
+    $cfg['imageExtensions'] = @('.jpg','.jpeg','.png','.heic','.heif','.tiff','.tif','.gif','.bmp','.webp','.avif','.cr2','.cr3','.arw','.dng','.raf','.nef','.orf','.rw2')
 }
 if (-not $cfg.ContainsKey('videoExtensions'))        {
     $cfg['videoExtensions'] = @('.mov','.mp4','.m4v','.avi','.3gp','.mts')
@@ -189,9 +189,11 @@ Write-Step 'Reading metadata with ExifTool (this may take a moment)...'
 # EXIFTOOL  — bulk-read metadata as JSON
 # ─────────────────────────────────────────────
 
-# Build file list
+# Build file list  (exclude heic backup folder so re-runs are safe)
+$heicBackupDir = Join-Path $inputDir $cfg['heicBackupFolder']
 $files = @(Get-ChildItem -Path $inputDir -File -Recurse | Where-Object {
-    $allExtensions -contains $_.Extension.ToLower()
+    ($allExtensions -contains $_.Extension.ToLower()) -and
+    ($_.DirectoryName -ne $heicBackupDir)
 })
 
 if ($files.Count -eq 0) {
@@ -216,12 +218,25 @@ $exifArgs = @(
     '-SubSecDateTimeOriginal'
     '-SubSecCreateDate'
     '-OffsetTimeOriginal'
+    '-i', $cfg['heicBackupFolder'] # skip HEIC backup folder on re-runs
     '-r'                           # recursive
     $inputDir
 )
 
 $rawJson = & $cfg['exiftoolPath'] @exifArgs 2>$null
 $exifData = @($rawJson | ConvertFrom-Json)
+
+# Filter to only supported extensions (ExifTool may return extra file types)
+$exifData = @($exifData | Where-Object {
+    $allExtensions -contains ([System.IO.Path]::GetExtension($_.FileName).ToLower())
+})
+
+# Build a lookup from Get-ChildItem → real filesystem paths.
+# This resolves Unicode mismatches between ExifTool's output and the Windows filesystem.
+$fsPathLookup = @{}
+foreach ($f in $files) {
+    $fsPathLookup[$f.Name] = $f.FullName
+}
 
 # ─────────────────────────────────────────────
 # PARSE & BUILD FILE-INFO OBJECTS
@@ -252,7 +267,12 @@ function Parse-ExifDate {
 $fileInfos = [System.Collections.Generic.List[hashtable]]::new()
 
 foreach ($item in $exifData) {
-    $fullPath = Join-Path $item.Directory $item.FileName
+    # Prefer filesystem-resolved path to handle Unicode filenames correctly
+    $fullPath = if ($fsPathLookup.ContainsKey($item.FileName)) {
+        $fsPathLookup[$item.FileName]
+    } else {
+        Join-Path $item.Directory $item.FileName
+    }
 
     # Best date: SubSecDateTimeOriginal > DateTimeOriginal > CreateDate > MediaCreateDate > ModifyDate > FileModifyDate
     $dateTaken = $null

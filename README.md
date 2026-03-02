@@ -23,32 +23,48 @@ Rename iCloud photos & videos using **GPS location** and **date-taken** metadata
 |------|---------------|
 | **PowerShell 7+** | `winget install Microsoft.PowerShell` or [download](https://github.com/PowerShell/PowerShell/releases) |
 | **ExifTool** | [exiftool.org](https://exiftool.org) — download the Windows executable |
+| **ImageMagick** *(optional)* | [imagemagick.org](https://imagemagick.org) or `winget install ImageMagick.ImageMagick` — needed only for HEIC→JPG conversion |
 
 ### ExifTool setup
 
 1. Download the **Windows Executable** from https://exiftool.org
 2. Extract and rename `exiftool(-k).exe` → `exiftool.exe`
 3. **Either** place it next to `Rename-ICloudPhotos.ps1` **or** add its folder to your `PATH`
+4. Or set `"exiftoolPath"` in `config.local.json` to the full path
+
+### ImageMagick setup *(optional — for HEIC→JPG)*
+
+1. Install via `winget install ImageMagick.ImageMagick` or download from https://imagemagick.org
+2. If `magick` isn't on PATH, set `"imageMagickPath"` in `config.local.json` to the full `.exe` path
 
 ## Quick Start
 
 ```powershell
 # 1 — Clone the repo
-git clone https://github.com/YOUR_USERNAME/icloud-photo-renamer.git
+git clone https://github.com/BillyBobsParoleOfficer/icloud-photo-renamer.git
 cd icloud-photo-renamer
 
 # 2 — Create your local config (git-ignored)
 Copy-Item config.json config.local.json
 
-# 3 — Edit config.local.json — set your inputFolder and email
+# 3 — Edit config.local.json — set your inputFolder and nominatimEmail
 notepad config.local.json
 
 # 4 — Dry-run (preview only, no changes)
 .\Rename-ICloudPhotos.ps1
 
-# 5 — Execute for real
-.\Rename-ICloudPhotos.ps1 -Execute
+# 5 — Happy with the preview?  Apply for real
+.\Rename-ICloudPhotos.ps1 -Apply
 ```
+
+## Re-running Safely
+
+The script is **idempotent** — you can re-run it on the same folder without problems:
+
+- **Already-renamed files** are detected and skipped (name matches target)
+- **HEIC backup folder** (`heic/`) is excluded from scanning, so converted originals aren't re-processed
+- **Geocode cache** (`geocode-cache.json`) is reused, so repeat runs skip the slow Nominatim API
+- **New files** added to the folder are processed while existing renamed files are left alone
 
 ## Configuration
 
@@ -57,23 +73,28 @@ Edit **`config.local.json`** (copy of `config.json`, git-ignored):
 | Key | Default | Description |
 |-----|---------|-------------|
 | `inputFolder` | — | Path to your iCloud photos folder |
-| `dryRun` | `true` | Preview mode — set to `false` or use `-Execute` |
+| `dryRun` | `true` | Preview mode — set to `false` or use `-Apply` |
 | `nameTemplate` | `{country}_{city}_{date}_{time}` | Tokens: `{country}`, `{state}`, `{city}`, `{suburb}`, `{road}`, `{date}`, `{time}` |
 | `dateFormat` | `yyyy-MM-dd` | .NET date format string |
 | `timeFormat` | `HH-mm-ss-fff` | .NET time format string (fff = milliseconds) |
-| `gapFillMaxMinutes` | `60` | How far to look for a GPS-tagged neighbour |
+| `gapFillMaxMinutes` | `720` | How far (in minutes) to look for a GPS-tagged neighbour (12 hours) |
 | `fixTimestamps` | `true` | Update file Created & Modified to match date-taken |
+| `convertHeicToJpg` | `true` | Convert HEIC/HEIF to JPG (requires ImageMagick) |
+| `jpgQuality` | `95` | JPEG quality for HEIC conversion (1–100) |
+| `heicBackupFolder` | `heic` | Where to move HEIC originals after conversion |
 | `nominatimEmail` | — | **Required** by Nominatim usage policy ([details](https://operations.osmfoundation.org/policies/nominatim/)) |
 | `geocodeCache` | `true` | Cache geocode results to `geocode-cache.json` |
 | `organizeIntoSubfolders` | `false` | Move files into `{country}\{city}` subfolders |
 | `unknownLocation` | `Unknown` | Placeholder when no location is found |
+| `exiftoolPath` | `exiftool` | Path to ExifTool executable |
+| `imageMagickPath` | `magick` | Path to ImageMagick executable |
 
 ## CLI Parameters
 
 ```powershell
 .\Rename-ICloudPhotos.ps1
     [-InputFolder <path>]     # Override inputFolder from config
-    [-Execute]                # Actually rename (disables dry-run)
+    [-Apply]                  # Actually rename (disables dry-run)
     [-SkipGeocoding]          # Skip reverse geocoding (use existing cache)
     [-Force]                  # Overwrite existing files on collision
     [-ConfigPath <path>]      # Use a specific config file
@@ -124,7 +145,7 @@ Then **File → Open Workspace from File…** and select it.
 
 ## Supported File Types
 
-**Images:** JPG, JPEG, PNG, HEIC, HEIF, TIFF, GIF, BMP, WebP, CR2, CR3, ARW, DNG, RAF, NEF, ORF, RW2
+**Images:** JPG, JPEG, PNG, HEIC, HEIF, TIFF, GIF, BMP, WebP, AVIF, CR2, CR3, ARW, DNG, RAF, NEF, ORF, RW2
 
 **Videos:** MOV, MP4, M4V, AVI, 3GP, MTS
 
