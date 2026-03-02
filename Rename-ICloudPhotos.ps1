@@ -505,6 +505,21 @@ Write-Host "  Gap-filled: $gapFilledCount file(s)`n"
 # ─────────────────────────────────────────────
 Write-Step 'Building new file names...'
 
+# US state abbreviations for compact filenames
+$usStateAbbrev = @{
+    'Alabama'='AL';'Alaska'='AK';'Arizona'='AZ';'Arkansas'='AR';'California'='CA'
+    'Colorado'='CO';'Connecticut'='CT';'Delaware'='DE';'Florida'='FL';'Georgia'='GA'
+    'Hawaii'='HI';'Idaho'='ID';'Illinois'='IL';'Indiana'='IN';'Iowa'='IA'
+    'Kansas'='KS';'Kentucky'='KY';'Louisiana'='LA';'Maine'='ME';'Maryland'='MD'
+    'Massachusetts'='MA';'Michigan'='MI';'Minnesota'='MN';'Mississippi'='MS';'Missouri'='MO'
+    'Montana'='MT';'Nebraska'='NE';'Nevada'='NV';'New Hampshire'='NH';'New Jersey'='NJ'
+    'New Mexico'='NM';'New York'='NY';'North Carolina'='NC';'North Dakota'='ND';'Ohio'='OH'
+    'Oklahoma'='OK';'Oregon'='OR';'Pennsylvania'='PA';'Rhode Island'='RI';'South Carolina'='SC'
+    'South Dakota'='SD';'Tennessee'='TN';'Texas'='TX';'Utah'='UT';'Vermont'='VT'
+    'Virginia'='VA';'Washington'='WA';'West Virginia'='WV';'Wisconsin'='WI';'Wyoming'='WY'
+    'District of Columbia'='DC';'Puerto Rico'='PR';'Guam'='GU';'U.S. Virgin Islands'='VI'
+}
+
 function Sanitize-FileName {
     param([string]$name)
     $illegal = [System.IO.Path]::GetInvalidFileNameChars()
@@ -525,6 +540,12 @@ foreach ($fi in $fileInfos) {
     $state   = if ($fi.State)   { $fi.State }   else { $cfg['unknownLocation'] }
     $suburb  = if ($fi.Suburb)  { $fi.Suburb }  else { '' }
     $road    = if ($fi.Road)    { $fi.Road }    else { '' }
+
+    # For United States files, append state abbreviation to city  (e.g. "Newark_NJ")
+    if ($fi.Country -eq 'United States' -and $fi.State -and $fi.City) {
+        $abbrev = if ($usStateAbbrev.ContainsKey($fi.State)) { $usStateAbbrev[$fi.State] } else { $fi.State }
+        $city = "$city`_$abbrev"
+    }
 
     # Date/time tokens
     if ($fi.DateTaken) {
