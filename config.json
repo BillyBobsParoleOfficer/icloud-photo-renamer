@@ -35,7 +35,7 @@
   "sanitizeChars": true,
 
   "// GAP-FILL": "Max minutes to look either side when a file has no GPS",
-  "gapFillMaxMinutes": 120,
+  "gapFillMaxMinutes": 180,
 
   "// TIMESTAMP FIX": "Set file Created & Modified to DateTimeOriginal",
   "fixTimestamps": true,
